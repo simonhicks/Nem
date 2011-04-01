@@ -1,0 +1,13 @@
+#!/usr/bin/env coffee
+
+fs = require('fs')
+path = require 'path'
+{expect, report} = require '../src/helpers'
+
+files = fs.readdirSync("tests/")
+for file in files
+  do (file) ->
+    if path.extname(file) is '.coffee'
+      require("../tests/#{file}")
+
+report()
