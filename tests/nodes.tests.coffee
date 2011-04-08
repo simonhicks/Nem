@@ -149,10 +149,151 @@ expect_error('expr message error', 'CompileError: EXPR messages can only be sent
   o.send(['IDENT', 'foo']).send(['EXPR', 'blah blah blah']).compile()
 )
 
+# while
+expect('while loop', 'while (foo) {\n  alert("hello");\n}', ->
+  o.send(['IDENT', 'while', [[['IDENT', 'foo']], [['IDENT', 'alert',[[['STRING', '"hello"']]]]]]]).compile()
+)
+expect('wrapped while loop', '(function () {\n  while (foo) {\n    alert("hello");\n  };\n})()', ->
+  o.send(['IDENT', 'while', [[['IDENT', 'foo']], [['IDENT', 'alert',[[['STRING', '"hello"']]]]]]]).wrap().compile()
+)
 
-# refactor called Idents to use Ident and CallNode
-# 
-# TODO
-#   add a #wrap method to all nodes
-#     should return this if no wrapping is needed
-#     should return new CallNode(@parent, new FunctionNode(@parent, this)) otherwise
+# named functions
+expect('named functions', 'function Blagh () {\n  alert("BLAGH!");\n}', ->
+  o.send(['IDENT', 'function', [[['IDENT', "Blagh"]], [['IDENT', 'array', []]], [['IDENT', 'alert', [[['STRING', '"BLAGH!"']]]]]]]).compile()
+)
+expect('wrapped named functions', '(function Blagh () {\n  alert("BLAGH!");\n})', ->
+  o.send(['IDENT', 'function', [[['IDENT', "Blagh"]], [['IDENT', 'array', []]], [['IDENT', 'alert', [[['STRING', '"BLAGH!"']]]]]]]).wrap().compile()
+)
+
+# ternary operator
+expect('ternary operator', 'foo ? bar() : baz()', ->
+  o.send(['IDENT', '?:', [[['IDENT', 'foo']], [['IDENT', 'bar', []]], [['IDENT', 'baz', []]]]]).compile()
+)
+expect('wrapping a ternary operator', 'foo ? bar() : baz()', ->
+  o.send(['IDENT', '?:', [[['IDENT', 'foo']], [['IDENT', 'bar', []]], [['IDENT', 'baz', []]]]]).compile()
+)
+
+# returns
+expect('return', 'return a', ->
+  o.send(['IDENT', 'return']).send(['IDENT', 'a']).compile()
+)
+expect('returning a chain', 'return a.b().c', ->
+  o.send(['IDENT', 'return']).send(['IDENT', 'a']).send(['IDENT', 'b', []]).send(['IDENT', 'c']).compile()
+)
+
+
+# automatic wrapping
+# alert(if(foo, return bar()))
+expect('automatic wrapping of args', 'alert((function () {\n  if (foo) {\n    return bar();\n  };\n})())', ->
+  o.send(['IDENT', 'alert', [[['IDENT', 'if', [[['IDENT', 'foo']], [['IDENT', 'return'], ['IDENT', 'bar', []]]]]]]]).compile()
+)
+expect('automatic wrapping of method args', 'obj.method((function () {\n  if (foo) {\n    return bar();\n  };\n})())', ->
+  o.send(['IDENT', 'obj']).send(['IDENT', 'method', [[['IDENT', 'if', [[['IDENT', 'foo']], [['IDENT', 'return'], ['IDENT', 'bar', []]]]]]]]).compile()
+)
+expect('automatic wraping in a call chain', '(function () {\n  if (a) {\n    b;\n  };\n})().c()', ->
+  o.send(['IDENT', 'if', [[['IDENT', 'a']], [['IDENT', 'b']]]]).send(['IDENT', 'c', []]).compile()
+)
+expect('automatic wrapping in field access', '(function () {\n  if (a) {\n    b;\n  };\n})()[0]', ->
+  o.send(['IDENT', 'if', [[['IDENT', 'a']], [['IDENT', 'b']]]]).send(['NUMBER', 0]).compile()
+)
+expect('automatic wrapping in a get method', 'blah[(function () {\n  if (a) {\n    b;\n  };\n})()]', ->
+  o.send(['IDENT', 'blah']).send(['IDENT', 'get', [[['IDENT', 'if', [[['IDENT', 'a']], [['IDENT', 'b']]]]]]]).compile()
+)
+expect('automatic wrapping for if node, conditions', 'if ((function () {\n  if (a) {\n    b;\n  };\n})()) {\n  c();\n}', ->
+  o.send(['IDENT', 'if', [[['IDENT', 'if', [[['IDENT', 'a']], [['IDENT', 'b']]]]], [['IDENT', 'c', []]]]]).compile()
+)
+expect('automatic wrapping for elsif', 'else if ((function () {\n  if (a) {\n    b;\n  };\n})()) {\n  c();\n}', ->
+  o.send(['IDENT', 'elsif', [[['IDENT', 'if', [[['IDENT', 'a']], [['IDENT', 'b']]]]], [['IDENT', 'c', []]]]]).compile()
+)
+expect('automatic wrapping in ternary operator', '(function () {\n  if (a) {\n    b;\n  };\n})() ? (function () {\n  if (c) {\n    d;\n  };\n})() : (function () {\n  if (e) {\n    f;\n  };\n})()', ->
+  o.send(['IDENT', '?:', [[['IDENT', 'if', [[['IDENT', 'a']], [['IDENT', 'b']]]]], [['IDENT', 'if', [[['IDENT', 'c']], [['IDENT', 'd']]]]], [['IDENT', 'if', [[['IDENT', 'e']], [['IDENT', 'f']]]]]]]).compile()
+)
+
+# prefix operators
+expect('new operator', 'new Object()', ->
+  o.send(['IDENT', 'new']).send(['IDENT', 'Object', []]).compile()
+)
+expect('not operator', '! a', ->
+  o.send(['IDENT', '!']).send(['IDENT', 'a']).compile()
+)
+
+# bracketted operations
+expect('not in a chain without brackets', '! foo.bar', ->
+  o.send(['IDENT', '!']).send(['IDENT', 'foo']).send(['IDENT', 'bar']).compile()
+)
+expect('using brackets to change the order of execution', '(new Foo()).bar', ->
+  # (new Foo()) bar
+  o.send([['IDENT', 'new'], ['IDENT', 'Foo', []]]).send(['IDENT', 'bar']).compile()
+)
+expect('sending a bracketed form', '(! (foo.bar)).baz', ->
+  # (! (foo bar)) baz
+  o.send([['IDENT', '!'], [['IDENT', 'foo'], ['IDENT', 'bar']]]).send(['IDENT','baz']).compile()
+)
+
+# arithmetic
+expect('adding numbers', '1 + 2', ->
+  o.send(['NUMBER', 1]).send(['IDENT', '+']).send(['NUMBER', 2]).compile()
+)
+expect('multiplying', '2 * 3', ->
+  o.send(['NUMBER', 2]).send(['IDENT', '*']).send(['NUMBER', 3]).compile()
+)
+expect('wrapped arithmetic', '(1 + 2)', ->
+  o.send(['NUMBER', 1]).send(['IDENT', '+']).send(['NUMBER', 2]).wrap().compile()
+)
+expect('using brackets with arithmetic', '2 * (3 + 4)', ->
+  o.send(['NUMBER', 2]).send(['IDENT', '*']).send([['NUMBER', 3], ['IDENT', "+"], ['NUMBER', 4]]).compile()
+)
+expect('using brackets with arithmetic', '(2 * (3 + 4)) + 5', ->
+  o.send(['NUMBER', 2]).send(['IDENT', '*']).send([['NUMBER', 3], ['IDENT', "+"], ['NUMBER', 4]]).send(['IDENT', '+']).send(['NUMBER', 5]).compile()
+)
+
+# splice
+# obj splice((foo bar baz)) should be equivalent to obj foo bar baz
+# then we can use it in the expansion of #{...}
+expect('splice', 'obj.foo.bar().baz', ->
+  o.send(['IDENT', 'obj']).send(['IDENT', 'splice', [[[['IDENT', 'foo'], ['IDENT', 'bar', []], ['IDENT', 'baz']]]]]).compile()
+)
+
+# creating macros
+macro_name = [["IDENT", "unless"]]
+macro_args = [["IDENT", "array", [[["IDENT", "cond"]], [["IDENT", "body"]]]]]
+splice_chain = [['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"splice"']], [['IDENT', 'array', [[['IDENT', 'array', [[[['IDENT', 'cond']]]]]]]]]]]]
+cond_chain = [['IDENT', 'array', [[['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"!"']]]]], splice_chain]]]
+body_chain = [['IDENT', 'array', [[['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"splice"']], [['IDENT', 'array', [[['IDENT', 'array', [[[['IDENT', 'body']]]]]]]]]]]]]]]
+macro_body = [["IDENT", "array", [[["IDENT", "array", [[["STRING", '"IDENT"']], [["STRING", '"if"']], [['IDENT', 'array', [cond_chain, body_chain]]]]]]]]]
+macro_def = ["IDENT", "macro", [macro_name, macro_args, [['IDENT', 'return', [macro_body]]]]]
+expect('defining a macro','''
+  if ((! foo)) {
+    bar.baz();
+  }''', ->
+  tmp = new Origin()
+  tmp.send(macro_def)
+  tmp.send(['IDENT', 'unless', [[['IDENT', 'foo']], [['IDENT', 'bar'], ['IDENT', 'baz', []]]]]).compile()
+)
+
+# basic assignment
+expect('simple assignment', 'a = 1', ->
+  o.send(['IDENT', 'a']).send(['IDENT', '=']).send(['NUMBER', 1]).compile()
+)
+expect('chained assignment', 'a = (b = 1)', ->
+  o.send(['IDENT', 'a']).send(['IDENT', '=']).send(['IDENT', 'b']).send(['IDENT', '=']).send(['NUMBER', 1]).compile()
+)
+expect('wrapping assignments', '(foo = bar()).baz()', ->
+  o.send([['IDENT', 'foo'], ['IDENT', '='], ['IDENT', 'bar', []]]).send(['IDENT', 'baz', []]).compile()
+)
+
+# array destructuring
+expect('array destructuring', 'var __ref = foo();\na = __ref[0];\nb = __ref[1]', ->
+  # [a, b] = foo()
+  o.send(['IDENT', 'array', [[['IDENT', 'a']], [['IDENT', 'b']]]]).send(['IDENT', '=']).send(['IDENT', 'foo', []]).compile()
+)
+expect('nested array destructuring', 'var __ref = foo();\na = __ref[0];\ns = (__ref[1])[0];\nd = (__ref[1])[1]', ->
+  # [a, [s, d]] = foo()
+  puts o.send(['IDENT', 'array', [[['IDENT', 'a']], [['IDENT', 'array', [[['IDENT', 's']], [['IDENT', 'd']]]]]]]).send(['IDENT', '=']).send(['IDENT', 'foo', []]).compile()
+  o.send(['IDENT', 'array', [[['IDENT', 'a']], [['IDENT', 'array', [[['IDENT', 's']], [['IDENT', 'd']]]]]]]).send(['IDENT', '=']).send(['IDENT', 'foo', []]).compile()
+)
+
+
+# TODO think about #wrap for blocks
+# TODO make this work... if (foo, blah()) else( blah())
+# TODO and this... if (foo, blah()) else if(boo, blah)

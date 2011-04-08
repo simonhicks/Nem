@@ -1,4 +1,4 @@
-{ps, action, range, repeat1, choice, sequence, optional, negate, token, repeat0, end_p} = require('../libs/jsparse')
+{list, ps, action, range, repeat1, choice, sequence, optional, negate, token, repeat0, end_p} = require('../libs/jsparse')
 {printable_array, flatten, remove} = require './helpers'
 {puts} = require 'sys'
 
@@ -22,6 +22,19 @@ nb_whitespace = action(repeat1(choice(' ', '\t', '\f')), (ast) -> " ")
 
 whitespace = repeat1(choice(nb_whitespace, linebreak))
 
+# parser-combinator convenience functions
+splice = (parser) ->
+  action sequence('#{', parser, '}'), (ast) ->
+    ast[1].unshift('SPLICE')
+    ast[1]
+
+unquote = (parser) ->
+  action sequence('@{', parser, '}'), (ast) ->
+    ast[1].unshift('UNQUOTE')
+    ast[1]
+
+possible_splice = (parser) ->
+  choice(unquote(parser), splice(parser), parser)
 
 # Number literals
 zero = action "0", (ast) -> 0
@@ -84,7 +97,7 @@ make_string = (ast) ->
 
 single_string_literal = sequence("'", optional(single_string_characters), "'")
 double_string_literal = sequence('"', optional(double_string_characters), '"')
-string_literal = action choice(single_string_literal, double_string_literal), make_string
+string_literal = action(choice(single_string_literal, double_string_literal), make_string)
 
 
 # Regexp literals
@@ -124,25 +137,24 @@ args = action sequence(expr, repeat0(choice(extra_arg, bad_arg))), (ast) ->
 
 arg_list = sequence(open_paren, optional(args), close_paren)
 
-message_char = negate(choice("`",";",",","(",")","[","]","{", "}",'"', "'",whitespace))
+message_char = negate(choice("#","`",";",",","(",")","[","]","{", "}",'"', "'",whitespace))
 
-uncalled_message = action repeat1(message_char), (ast) -> 
-  ["IDENT", flatten(ast).join('')]
+uncalled_message = action(repeat1(message_char), (ast) -> 
+  ["IDENT", flatten(ast).join('')])
 
-called_message = action sequence(repeat1(message_char), arg_list), (ast) ->
+called_message = action(sequence(repeat1(message_char), arg_list), (ast) ->
   arg_list = ast[1][0] || []
-  ["IDENT", flatten(ast[0]).join(''), arg_list]
+  ["IDENT", flatten(ast[0]).join(''), arg_list])
 
 message_literal = choice(called_message, uncalled_message)
-
 
 # Arrays
 open_square = sequence(optional(nb_whitespace), "[", optional(whitespace))
 
 close_square = sequence(optional(whitespace), "]")
 
-array_literal = action sequence(open_square, optional(args), close_square), (ast) ->
-  ["IDENT", 'array', ast[1]]
+array_literal = action(sequence(open_square, optional(args), close_square), (ast) ->
+  ["IDENT", 'array', ast[1]])
 
 # Chained messages
 chain_part = choice(non_message_literal, message_literal)
@@ -150,11 +162,15 @@ chain_part = choice(non_message_literal, message_literal)
 extra_literal = action sequence(nb_whitespace,chain_part), (ast) ->
   ast[1]
 
-open_chain = action sequence(optional(whitespace), chain_part, repeat0(extra_literal)), (ast) ->
+open_chain = action(sequence(optional(whitespace), chain_part, repeat0(extra_literal)), (ast) ->
   [ast[1]].concat ast[2]
+)
 
-chain_in_parens = action sequence(open_paren, choice(open_chain, literal), close_paren), (ast) ->
+chain_in_parens = possible_splice action(sequence(open_paren, choice(open_chain, literal), close_paren), (ast) ->
   ast[0]
+)
+spliced_chain = splice(open_chain)
+unquoted_chain = unquote(open_chain)
 
 
 # Object literals
@@ -180,19 +196,36 @@ object_literal = action sequence(open_curly, optional(args), close_curly), (ast)
 # Special stuff
 comment = action sequence(optional(whitespace), ';', repeat0(negate(linebreak))), (ast) -> null
 
-syntax_quote = action "`", (ast) ->
-  ["IDENT", 'quote']
-
 end_of_code = sequence optional(whitespace), end_p
 
-non_message_literal = choice( numeric_literal, string_literal, regexp_literal, array_literal, object_literal, chain_in_parens)
+basic_literal = possible_splice(choice(numeric_literal, string_literal, regexp_literal, array_literal, object_literal))
+non_message_literal = choice(basic_literal, unquoted_chain, spliced_chain, chain_in_parens)
 
-literal = action sequence(optional(syntax_quote), choice(open_chain, non_message_literal, message_literal)), (ast) ->
-  [q,l] = ast
-  if q
-    [q].concat(l)
+
+syntax_quote = (item) ->
+  if item.constructor is Array
+    if item[0] is 'UNQUOTE'
+      item.shift()
+      item
+    else if item[0] is 'SPLICE'
+      item.shift()
+      [['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"splice"']], [['IDENT', 'array', [[['IDENT', 'array', [[item]]]]]]]]]]
+    else
+      args = (syntax_quote(arg) for arg in item)
+      [['IDENT', 'array', args]]
+  else if item.constructor is Number
+    [['NUMBER', item]]
+  else if item.constructor is RegExp
+    [['REGEXP', item]]
+  else if item.constructor is String
+    [['STRING', '"' + item.replace(/"/g, '\\"') + '"']]
+
+literal = action sequence(optional("`"), choice(open_chain, non_message_literal, message_literal)), (ast) ->
+  pre_quote = remove false, ast[1]
+  if ast[0]
+    syntax_quote pre_quote
   else
-    l
+    pre_quote
 
 expr = action sequence(optional(nb_whitespace), literal, optional(comment)), (ast) ->
   remove false, ast[1]

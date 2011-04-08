@@ -2,6 +2,9 @@
 {Reader} = require('../src/reader')
 {puts} = require 'sys'
 
+Array::toString = ->
+  '[' + @join(", ") + ']'
+
 new_rdr = (c) -> new Reader(c)
 parse = (code) ->
   new_rdr(code).read()
@@ -257,13 +260,6 @@ expect('a comment before an expression', [['IDENT', 'foo']], ->
   ''')
 )
 
-# syntax quote
-expect('a syntax quote', [['IDENT', 'quote'], ['IDENT', 'Im_bored_of_foo', []], ['IDENT', 'whatever', []]], ->
-  parse('''
-  `Im_bored_of_foo() whatever()
-  ''')
-)
-
 # unmatched pair error messages
 expect_error('unbalanced parens', "SyntaxError: unclosed parenthesis on line 4", ->
   code = '''
@@ -336,10 +332,39 @@ expect_error('odd number of object arguments', 'SyntaxError: illegal object lite
   new_rdr(code).read_all()
 )
 
-# TODO register "implicit consumers" that expect a given minimum number of args... 
-#   if they don't have them in brackets, they can just absorb the next N messages in the chain
-# TODO convert tokens into "message objects", that can be sent to origin and compiled
-# TODO refactor to use 
-#   expect (for things that won't appear in the ast like "(")
-#   list (with expect() parsers as separators)
-#
+# meta programming stuff
+# syntax quote
+expect('a syntax quote',[['IDENT','array',[[['IDENT','array',[[['STRING','"IDENT"']],[['STRING','"Im_bored_of_foo"']],[['IDENT','array',[]]]]]],[['IDENT','array',[[['STRING','"IDENT"']],[['STRING','"whatever"']],[['IDENT','array',[]]]]]]]]], ->
+  parse('''
+  `Im_bored_of_foo() whatever()
+  ''')
+)
+
+spliced_part = [['IDENT', 'array', [[['IDENT', 'array', [[[['IDENT', 'bar']]]]]]]]]
+expect('a splice', [['IDENT', 'array', [[['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"foo"']]]]], [['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"splice"']], spliced_part]]]]]], ->
+  parse('''
+  `foo #{bar}
+  ''')
+)
+
+expect('an unquote',[['IDENT', 'array', [[['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"foo"']]]]], [['IDENT', 'bar']], [['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"baz"']]]]]]]], ->
+  parse('''
+  `foo @{bar} baz
+  ''')
+)
+
+macro_name = [["IDENT", "unless"]]
+macro_args = [["IDENT", "array", [[["IDENT", "cond"]], [["IDENT", "body"]]]]]
+splice_chain = [['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"splice"']], [['IDENT', 'array', [[['IDENT', 'array', [[[['IDENT', 'cond']]]]]]]]]]]]
+cond_chain = [['IDENT', 'array', [[['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"!"']]]]], splice_chain]]]
+body_chain = [['IDENT', 'array', [[['IDENT', 'array', [[['STRING', '"IDENT"']], [['STRING', '"splice"']], [['IDENT', 'array', [[['IDENT', 'array', [[[['IDENT', 'body']]]]]]]]]]]]]]]
+macro_body = [["IDENT", "array", [[["IDENT", "array", [[["STRING", '"IDENT"']], [["STRING", '"if"']], [['IDENT', 'array', [cond_chain, body_chain]]]]]]]]]
+
+expect('a splice in context', [["IDENT", "macro", [macro_name, macro_args, [['IDENT', 'return', [macro_body]]]]]], ->
+  puts 
+  parse '''
+  macro(unless, [cond, body]
+    return(`if(! #{cond}, #{body}))
+  )'''
+)
+
